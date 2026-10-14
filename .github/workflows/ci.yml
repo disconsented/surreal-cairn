@@ -1,0 +1,89 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rustfmt:
+    name: cargo fmt --check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `rustfmt.toml` sets options that only nightly rustfmt reads, such as
+      # `group_imports`, `imports_granularity` and `format_strings`.
+      - name: Install the nightly rustfmt
+        run: rustup toolchain install nightly --profile minimal --component rustfmt
+
+      - name: Check the formatting
+        run: cargo +nightly fmt --all --check
+
+  taplo:
+    name: taplo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install taplo
+        uses: taiki-e/install-action@v2
+        with:
+          tool: taplo-cli
+
+      - name: Check the TOML formatting
+        run: taplo fmt --check
+
+      - name: Lint the TOML
+        run: taplo lint
+
+  clippy:
+    name: cargo clippy (${{ matrix.features }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # `cli` is the only feature, so these two cover every combination.
+        features: [--no-default-features, --all-features]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clippy
+        run: rustup component add clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.features }}
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets --locked ${{ matrix.features }} -- -D warnings
+
+  test:
+    name: cargo test (${{ matrix.features }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features: [--no-default-features, --all-features]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.features }}
+
+      # The RocksDB tests build librocksdb from source, which needs clang. The
+      # runner image holds it.
+      - name: Run the tests
+        run: cargo test --workspace --locked ${{ matrix.features }}
